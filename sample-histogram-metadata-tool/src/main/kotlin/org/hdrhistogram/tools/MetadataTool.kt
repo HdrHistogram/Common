@@ -7,7 +7,6 @@ import org.HdrHistogram.HistogramIterationValue
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.file.Files
-import java.nio.file.Paths
 import java.util.zip.GZIPOutputStream
 
 object MetadataTool {
@@ -16,7 +15,7 @@ object MetadataTool {
         // provide directory containing histograms
         val dir = File(args[0])
 
-        val writer = ObjectMapper().writer()
+        val writer = ObjectMapper().writerWithDefaultPrettyPrinter()
 
         Files.newDirectoryStream(dir.toPath(), "*.histo").use { stream ->
             stream.forEach { path ->
@@ -60,8 +59,10 @@ object MetadataTool {
                                 all = histo.allValues().map { IteratorValue(it) })
                 )
 
-                val metadataFileName = path.fileName.toString().replace("\\.histo$", "-metadata.json.gz")
-                Files.newOutputStream(Paths.get(metadataFileName)).use { fos ->
+                val metadataFileName = path.fileName.toString().replace(Regex("\\.histo$"), "-metadata.json.gz")
+                val metadataPath = path.parent.resolve(metadataFileName)
+                Files.newOutputStream(metadataPath).use { fos ->
+                    // TODO use xz; it's less than half the size of gzip
                     GZIPOutputStream(fos).use { gzos ->
                         writer.writeValue(gzos, metadata)
                     }
