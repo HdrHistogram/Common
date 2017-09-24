@@ -1,2 +1,3 @@
 # Common
-Information and resources common across various implementations
+Information and resources common across various HdrHistogram implementations
+
