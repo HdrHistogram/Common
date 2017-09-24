@@ -1,0 +1,8 @@
+target
+build
+out
+.idea
+*.iml
+gh-pages
+release.properties
+pom.xml.releaseBackup
