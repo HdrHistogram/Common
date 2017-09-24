@@ -10,10 +10,19 @@ This license does not detract from the above stated release of the code
 and files into the public domain, and simply represents an additional license
 granted by the Authors.
 
+NOTE TO CONTRIBUTING AUTHORS: Contents added to this repositotry are expected
+to be licensed in way consistent with the licenses laid out in this file.
+As you add contents to this repository, you must make sure you have the proper
+ownership or license to contrubute the added material under these license terms,
+and update this LICENSE file accordingly. Specifically: You must add any new
+author's name to the public domain notice at the top of this file, as well as
+any new copyright date to the list of copyright notice in the BSD license
+section below. 
+
 -----------------------------------------------------------------------------
 ** Beginning of "BSD 2-Clause License" text. **
 
- Copyright (c) 2017 Gil Tene
+ Copyright (c) 2016, 2017 Gil Tene
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
