@@ -4,10 +4,11 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.HdrHistogram.Histogram
 import org.HdrHistogram.HistogramIterationValue
+import org.tukaani.xz.LZMA2Options
+import org.tukaani.xz.XZOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.file.Files
-import java.util.zip.GZIPOutputStream
 
 object MetadataTool {
     @JvmStatic
@@ -19,6 +20,7 @@ object MetadataTool {
 
         Files.newDirectoryStream(dir.toPath(), "*.histo").use { stream ->
             stream.forEach { path ->
+                println("Processing $path")
 
                 val buf = ByteBuffer.wrap(Files.readAllBytes(path))
                 val histo = Histogram.decodeFromCompressedByteBuffer(buf, 1)
@@ -38,11 +40,12 @@ object MetadataTool {
                                 .associateBy({ it }, { i -> histo.getValueAtPercentile(i) }),
                         iterators = Iterators(
                                 linear = (0..14)
-                                        // linear stride across several powers of 2
+                                        // linear stride with strides at several powers of 2
                                         .map { 1L.shl(it) }
                                         .associateBy({ "$it" },
                                                 { histo.linearBucketValues(it).map { IteratorValue(it) } }),
                                 percentile = (0..9)
+                                        // percentile iteration at several units-per-tick
                                         .map { 1.shl(it) }
                                         .associateBy({ "$it" }, { histo.percentiles(it).map { IteratorValue(it) } }),
                                 logarithmic = listOf(1L, 100, 1000)
@@ -59,12 +62,11 @@ object MetadataTool {
                                 all = histo.allValues().map { IteratorValue(it) })
                 )
 
-                val metadataFileName = path.fileName.toString().replace(Regex("\\.histo$"), "-metadata.json.gz")
+                val metadataFileName = path.fileName.toString().replace(Regex("\\.histo$"), "-metadata.json.xz")
                 val metadataPath = path.parent.resolve(metadataFileName)
                 Files.newOutputStream(metadataPath).use { fos ->
-                    // TODO use xz; it's less than half the size of gzip
-                    GZIPOutputStream(fos).use { gzos ->
-                        writer.writeValue(gzos, metadata)
+                    XZOutputStream(fos, LZMA2Options()).use { xzos ->
+                        writer.writeValue(xzos, metadata)
                     }
                 }
             }
