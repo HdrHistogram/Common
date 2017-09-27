@@ -2,6 +2,8 @@ package org.hdrhistogram.tools
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.guava.GuavaModule
+import com.google.common.collect.Iterables.transform
 import joptsimple.OptionException
 import joptsimple.OptionParser
 import joptsimple.OptionSet
@@ -17,7 +19,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.Callable
+import java.util.concurrent.CompletionService
+import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 
 object MetadataTool {
@@ -39,14 +42,17 @@ object MetadataTool {
 
         val dir = File(opts!!.valueOf(dirOpt))
 
-        val jsonWriter = ObjectMapper().writerWithDefaultPrettyPrinter()
+        val mapper = ObjectMapper()
+        mapper.registerModule(GuavaModule())
+        val jsonWriter = mapper.writerWithDefaultPrettyPrinter()
 
         // It's trivial to parallelize
-        val ioPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+        val pool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+        val service: CompletionService<Path> = ExecutorCompletionService(pool)
 
         val futures = Files.newDirectoryStream(dir.toPath(), "*.histo").use { stream ->
             stream.map { path ->
-                ioPool.submit(Callable<Path> {
+                service.submit({
                     println("Starting $path")
                     val buf = ByteBuffer.wrap(Files.readAllBytes(path))
                     val histo = Histogram.decodeFromCompressedByteBuffer(buf, 1)
@@ -65,7 +71,7 @@ object MetadataTool {
 
         futures.addAll(Files.newDirectoryStream(dir.toPath(), "*.hlog").use { stream ->
             stream.map { path ->
-                ioPool.submit(Callable<Path> {
+                service.submit({
                     println("Starting $path")
                     val reader = HistogramLogReader(path.toFile())
 
@@ -91,10 +97,10 @@ object MetadataTool {
         })
 
         futures.forEach { f ->
-            println("${f.get()} finished")
+            println("Finished ${f.get()}")
         }
 
-        ioPool.shutdown()
+        pool.shutdown()
 
         println("Elapsed time: ${Duration.between(start, Instant.now())}")
     }
@@ -139,27 +145,16 @@ class HistogramTestData(@JsonProperty("totalCount") val count: Long,
                     // turn it into a map of percentile to value
                     .associateBy({ it }, { i -> h.getValueAtPercentile(i) }),
             iterators = Iterators(
-                    linear = (0..14)
+                    linear = (6..14)
                             // linear stride with strides at several powers of 2
                             .map { 1L.shl(it) }
                             .associateBy({ "$it" },
-                                    // Use a Sequence to keep the transformation lazy
-                                    {
-                                        h.linearBucketValues(it)
-                                                .asSequence()
-                                                .map { IteratorValue(it) }
-                                                .asIterable()
-                                    }),
+                                    { transform(h.linearBucketValues(it)) { IteratorValue(it!!) } }),
                     percentile = (0..9)
                             // percentile iteration at several units-per-tick
                             .map { 1.shl(it) }
                             .associateBy({ "$it" },
-                                    {
-                                        h.percentiles(it)
-                                                .asSequence()
-                                                .map { IteratorValue(it) }
-                                                .asIterable()
-                                    }),
+                                    { transform(h.percentiles(it)) { IteratorValue(it!!) } }),
                     logarithmic = listOf(1L, 100, 1000)
                             // There are two ways to vary a logarithmic iteration: the first bucket size, and the log
                             // base. So, we map pairs of first bucket and log bases into "firstbucket-logbase" names to
@@ -170,20 +165,11 @@ class HistogramTestData(@JsonProperty("totalCount") val count: Long,
                                 }
                             }
                             .associateBy({ "${it.first}-${it.second}" }, {
-                                h.logarithmicBucketValues(it.first, it.second)
-                                        .asSequence()
-                                        .map { IteratorValue(it) }
-                                        .asIterable()
+                                transform(h.logarithmicBucketValues(it.first, it.second)) { IteratorValue(it!!) }
                             }),
-                    recorded = h.recordedValues()
-                            .asSequence()
-                            .map { IteratorValue(it) }
-                            .asIterable(),
-                    all = h.allValues()
-                            .asSequence()
-                            .map { IteratorValue(it) }
-                            .asIterable())
-    )
+                    recorded = transform(h.recordedValues()) { IteratorValue(it!!) },
+                    all = transform(h.allValues()) { IteratorValue(it!!) }
+            ))
 }
 
 class IteratorValue(@JsonProperty("valueIteratedTo") val valueIteratedTo: Long,
