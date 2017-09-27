@@ -15,6 +15,8 @@ import org.HdrHistogram.HistogramLogReader
 import org.tukaani.xz.LZMA2Options
 import org.tukaani.xz.XZOutputStream
 import java.io.File
+import java.lang.Math.log
+import java.lang.Math.max
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
@@ -153,16 +155,17 @@ class HistogramTestData(@JsonProperty("totalCount") val count: Long,
                     // turn it into a map of percentile to value
                     .associateBy({ it }, { i -> h.getValueAtPercentile(i) }),
             iterators = Iterators(
-                    linear = (6..14)
+                    // pick a stride suitable for the size of the histogram so we don't use small strides on mega histos
+                    linear = (max(log2(h.maxValue) - 10, 1)..log2(h.maxValue))
                             // linear stride with strides at several powers of 2
                             .map { 1L.shl(it) }
                             .associateBy({ "$it" },
-                                    { transform(h.linearBucketValues(it)) { IteratorValue(it!!) } }),
+                                    { stride -> transform(h.linearBucketValues(stride)) { IteratorValue(it!!) } }),
                     percentile = (0..9)
                             // percentile iteration at several units-per-tick
                             .map { 1.shl(it) }
                             .associateBy({ "$it" },
-                                    { transform(h.percentiles(it)) { IteratorValue(it!!) } }),
+                                    { unitsPerTick -> transform(h.percentiles(unitsPerTick)) { IteratorValue(it!!) } }),
                     logarithmic = listOf(1L, 100, 1000)
                             // There are two ways to vary a logarithmic iteration: the first bucket size, and the log
                             // base. So, we map pairs of first bucket and log bases into "firstbucket-logbase" names to
@@ -178,7 +181,10 @@ class HistogramTestData(@JsonProperty("totalCount") val count: Long,
                     recorded = transform(h.recordedValues()) { IteratorValue(it!!) },
                     all = transform(h.allValues()) { IteratorValue(it!!) }
             ))
+
 }
+
+private fun log2(l: Long) = (log(l.toDouble()) / log(2.0)).toInt()
 
 class IteratorValue(@JsonProperty("valueIteratedTo") val valueIteratedTo: Long,
                     @JsonProperty("countAddedInThisIterationStep") val countAddedInThisIterationStep: Long,
