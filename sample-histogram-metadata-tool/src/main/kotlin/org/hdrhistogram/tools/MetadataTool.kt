@@ -2,6 +2,7 @@ package org.hdrhistogram.tools
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.ObjectWriter
 import com.fasterxml.jackson.datatype.guava.GuavaModule
 import com.google.common.collect.Iterables.transform
 import joptsimple.OptionException
@@ -50,59 +51,69 @@ object MetadataTool {
         val pool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
         val service: CompletionService<Path> = ExecutorCompletionService(pool)
 
-        val futures = Files.newDirectoryStream(dir.toPath(), "*.histo").use { stream ->
+        var futuresSubmitted = 0
+
+        Files.newDirectoryStream(dir.toPath(), "*.histo").use { stream ->
             stream.map { path ->
                 service.submit({
                     println("Starting $path")
                     val buf = ByteBuffer.wrap(Files.readAllBytes(path))
                     val histo = Histogram.decodeFromCompressedByteBuffer(buf, 1)
 
-                    val testDataPath = replaceSuffix(path, Regex("\\.histo$"), "-metadata.json.xz")
-                    Files.newOutputStream(testDataPath).use { fos ->
-                        XZOutputStream(fos, LZMA2Options()).use { xzos ->
-                            jsonWriter.writeValue(xzos, HistogramTestData(histo))
-                        }
-                    }
+                    val testDataPath = replaceSuffix(path, Regex("\\.histo$"), "-test-data.json.xz")
+                    writeToPath(testDataPath, jsonWriter, HistogramTestData(histo))
 
-                    path
+                    testDataPath
                 })
-            }.toMutableList()
+
+                futuresSubmitted += 1
+            }
         }
 
-        futures.addAll(Files.newDirectoryStream(dir.toPath(), "*.hlog").use { stream ->
+        Files.newDirectoryStream(dir.toPath(), "*.hlog").use { stream ->
             stream.map { path ->
-                service.submit({
-                    println("Starting $path")
-                    val reader = HistogramLogReader(path.toFile())
+                println("Starting $path")
+                val reader = HistogramLogReader(path.toFile())
 
-                    val histograms = mutableListOf<HistogramLogEntry>()
+                val logTestDataDir = replaceSuffix(path, Regex("\\.hlog$"), "-test-data")
+                logTestDataDir.toFile().mkdir()
 
-                    while (reader.hasNext()) {
-                        val h = reader.nextIntervalHistogram() as AbstractHistogram
+                var index = 0
 
-                        histograms.add(HistogramLogEntry(h))
+                while (reader.hasNext()) {
+                    val h = reader.nextIntervalHistogram() as AbstractHistogram
+                    val testDataPath = logTestDataDir.resolve("$index.json.xz")
+
+                    service.submit {
+                        writeToPath(testDataPath, jsonWriter, HistogramLogEntry(h))
+
+                        testDataPath
                     }
 
-                    val testDataPath = replaceSuffix(path, Regex("\\.hlog$"), "-metadata.json.xz")
-                    Files.newOutputStream(testDataPath).use { fos ->
-                        XZOutputStream(fos, LZMA2Options()).use { xzos ->
-                            jsonWriter.writeValue(xzos, HistogramLogTestData(histograms))
+                    futuresSubmitted += 1
 
-                        }
-                    }
+                    index += 1
+                }
+            }
+        }
 
-                    path
-                })
-            }.toMutableList()
-        })
-
-        futures.forEach { f ->
+        for (i in 0 until futuresSubmitted) {
+            val f = service.take()
             println("Finished ${f.get()}")
         }
 
         pool.shutdown()
 
         println("Elapsed time: ${Duration.between(start, Instant.now())}")
+    }
+
+}
+
+private fun writeToPath(path: Path, jsonWriter: ObjectWriter, obj: Any) {
+    Files.newOutputStream(path).use { fos ->
+        XZOutputStream(fos, LZMA2Options()).use { xzos ->
+            jsonWriter.writeValue(xzos, obj)
+        }
     }
 }
 
@@ -111,15 +122,12 @@ private fun replaceSuffix(path: Path, suffixPattern: Regex, replacement: String)
     return path.parent.resolve(metadataFileName)
 }
 
-
 class HistogramLogEntry(@JsonProperty("tag") val tag: String?,
                         @JsonProperty("startTime") val startTime: Long,
                         @JsonProperty("endTime") val endTime: Long,
                         @JsonProperty("histogram") val histogram: HistogramTestData) {
     constructor(h: AbstractHistogram) : this(h.tag, h.startTimeStamp, h.endTimeStamp, HistogramTestData(h))
 }
-
-class HistogramLogTestData(@JsonProperty("entries") val entries: List<HistogramLogEntry>)
 
 class HistogramTestData(@JsonProperty("totalCount") val count: Long,
                         @JsonProperty("maxValue") val max: Long,
