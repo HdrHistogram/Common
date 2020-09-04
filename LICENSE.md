@@ -4,7 +4,7 @@ http://creativecommons.org/publicdomain/zero/1.0/
 
 For users of this code who wish to consume it under the "BSD" license
 rather than under the public domain or CC0 contribution text mentioned
-above, the code anf files found under this repository is *also* provided
+above, the code and files found under this repository are *also* provided
 under the following license (commonly referred to as the BSD 2-Clause License).
 This license does not detract from the above stated release of the code 
 and files into the public domain, and simply represents an additional license
